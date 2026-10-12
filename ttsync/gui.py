@@ -28,7 +28,8 @@ except Exception:  # 未安装则优雅降级
     TkinterDnD = None
     HAS_DND = False
 
-APP_TITLE = "TokenTracker 数据同步"
+# 窗口标题带「非官方」，避免被误认为 TokenTracker 官方组件
+APP_TITLE = "tt-sync · TokenTracker 数据合并（非官方）"
 WIN_W, WIN_H = 980, 780
 LEFT_W = 596
 
@@ -142,7 +143,7 @@ class App:
         foot.place(x=LEFT_W, y=WIN_H - 54, width=WIN_W - LEFT_W, height=44)
         tk.Label(foot, text="tt-sync", bg=C_WASH, fg=C_TITLE,
                  font=(self.F, 11, "bold")).pack()
-        tk.Label(foot, text="本地合并 · 不联网 · 免费", bg=C_WASH, fg=C_MUTED,
+        tk.Label(foot, text="非官方 · 本地合并 · 不联网 · 免费", bg=C_WASH, fg=C_MUTED,
                  font=(self.F, 8)).pack()
 
     def _card(self, parent, title, **pk):

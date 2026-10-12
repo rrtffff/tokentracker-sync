@@ -138,6 +138,17 @@ python tests/diff_test.py
 
 在临时目录里用合成的双机数据跑一遍合并，断言：跨机器相加、机内 last-wins、幂等性、控制记录保留，并且——因为最初的原型是 JavaScript 写的——做一次**与 JS 实现的对拍测试**，断言每个桶的数值和合计完全一致。
 
+## 法律声明
+
+- **非官方工具。** 本项目与 TokenTracker 项目无关联、未获其背书。
+  它只与 TokenTracker 的磁盘文件格式互操作，**没有复制上游任何源码**。
+- **无联网。** 程序里没有任何联网代码，可以自行阅读源码确认。
+- 发布版二进制中打包的第三方组件许可（CPython、Tcl/Tk、tkinterdnd2、PyInstaller
+  bootloader）见 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。
+- 完整的风险分析、商标讨论、素材版权与分发注意事项：
+  [docs/LEGAL-AND-RISKS.md](docs/LEGAL-AND-RISKS.md)
+- 维护者请看 [docs/RELEASING.md](docs/RELEASING.md)（发布流程）。
+
 ## 目录结构
 
 ```

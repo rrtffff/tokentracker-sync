@@ -138,6 +138,17 @@ python tests/diff_test.py
 
 Runs the merge on synthetic two-machine data in a temp directory and asserts: cross-machine summing, in-machine last-wins, idempotency, control-record preservation, and — because the original tool was written in JavaScript — a **differential test against the JS implementation**, asserting identical per-bucket numbers and totals.
 
+## Legal & disclaimers
+
+- **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by TokenTracker.
+  It interoperates with TokenTracker's on-disk file formats only; no upstream source code was copied.
+- **No network access.** The program contains no networking code — you can read the source to confirm.
+- **Third-party licenses** bundled in the released binaries (CPython, Tcl/Tk, tkinterdnd2, PyInstaller
+  bootloader) are documented in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+- Full risk analysis, trademark discussion, artwork licensing and distribution caveats:
+  [docs/LEGAL-AND-RISKS.md](docs/LEGAL-AND-RISKS.md)
+- Maintainer? See [docs/RELEASING.md](docs/RELEASING.md) for the release process.
+
 ## Layout
 
 ```

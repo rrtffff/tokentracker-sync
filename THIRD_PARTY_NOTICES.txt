@@ -1,0 +1,55 @@
+THIRD-PARTY NOTICES
+===================
+
+The prebuilt binaries in Releases (TTSync.exe, ttsync-cli.exe) bundle the
+following third-party software. Their licenses are reproduced or referenced
+below. tt-sync itself is licensed under the MIT License (see LICENSE).
+
+-------------------------------------------------------------------------------
+1. Python (CPython) 3.12
+   License: Python Software Foundation License Version 2
+   https://docs.python.org/3/license.html
+   Bundled because the executables are frozen Python programs.
+
+2. Tcl/Tk 8.6 (used by tkinter, Python's standard GUI toolkit)
+   License: Tcl/Tk License (BSD-style)
+   https://www.tcl.tk/software/tcltk/license.html
+   Bundled because this program has a graphical interface.
+
+3. tkinterdnd2
+   License: MIT
+   https://github.com/pmgagne/tkinterdnd2
+   Bundled to support drag-and-drop into the window.
+
+4. tkdnd (the Tcl extension tkinterdnd2 wraps)
+   License: Tcl/Tk-style permissive license
+   https://github.com/petasis/tkdnd
+   Bundled together with tkinterdnd2.
+
+5. PyInstaller bootloader
+   License: GPL 2.0 **with a special exception** that explicitly permits using
+   PyInstaller to build and distribute programs under any license, including
+   proprietary and commercial ones.
+   https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
+   Only the bootloader is embedded in the produced executable; the resulting
+   program is not a derivative work of PyInstaller and is not subject to the GPL.
+
+-------------------------------------------------------------------------------
+Build-time only (NOT distributed inside the executables)
+-------------------------------------------------------------------------------
+- Pillow (MIT-CMU License) — used by packaging/make_assets.py to generate the
+  PNG/ICO files in assets/. Pillow itself is not bundled.
+
+-------------------------------------------------------------------------------
+Upstream project
+-------------------------------------------------------------------------------
+tt-sync reads and writes data files produced by TokenTracker
+(https://github.com/xiufengsun/TokenTracker), which is MIT licensed.
+
+tt-sync is an independent implementation: no source code from TokenTracker was
+copied into this project. It interoperates with TokenTracker's on-disk file
+formats only. Credited here as a courtesy and to help users find the upstream
+project.
+
+tt-sync is NOT affiliated with, endorsed by, or sponsored by the TokenTracker
+project.
