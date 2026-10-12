@@ -21,7 +21,7 @@
 在项目目录里执行（把 `你的用户名` 和 `仓库名` 换成实际的）：
 
 ```bash
-cd "C:/Users/me/Desktop/OpenSource/tokentracker-sync"
+cd path/to/tokentracker-sync
 git remote add origin https://github.com/你的用户名/仓库名.git
 git push -u origin master
 ```
@@ -38,13 +38,13 @@ git push -u origin master
 先在本地打包（如果还没打包，或改过代码之后）：
 
 ```bash
-cd "C:/Users/me/Desktop/OpenSource/tokentracker-sync"
+cd path/to/tokentracker-sync
 python packaging/build_windows.bat
 ```
 
 > 需要 Python 3.8+（带 tkinter）和 `pip install pyinstaller tkinterdnd2`。
-> 如果用的是我帮你配好的环境，直接跑：
-> `"C:/Users/me/.workbuddy/binaries/python/envs/ttsync-312/Scripts/python.exe" packaging/prepare_release.py`
+> 或者在装好依赖的虚拟环境里直接跑：
+> `python packaging/prepare_release.py`
 
 然后收集发布文件并生成校验值：
 
