@@ -160,6 +160,22 @@ None of the existing tools does "copy one file across and merge", and none of th
 understands TokenTracker's dedup semantics. See [docs/PRIOR-ART.md](docs/PRIOR-ART.md)
 for the survey, including what each alternative does and where the trade-offs are.
 
+## Security
+
+The one attack surface here is **the data file you import**. So the import path is
+treated as untrusted input and validated up front:
+
+- Numbers must be finite — `NaN` / `Infinity` are rejected, and the writer can never
+  emit them (they are invalid JSON and would break TokenTracker's own reader)
+- Rows are cleaned against a **numeric field allowlist**, so a crafted file cannot
+  inject arbitrary fields into your queue
+- Size limits on the file, on rows per queue, and on how many source machines are recorded
+- Restores are confined to the data directory by resolved-path check
+- Unparseable existing lines are preserved verbatim, never silently dropped
+
+Verified by `python tests/security_test.py` (15 assertions, each tied to a specific
+finding). Full threat model, findings and fixes: [docs/SECURITY.md](docs/SECURITY.md).
+
 ## Legal & disclaimers
 
 - **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by TokenTracker.
@@ -183,6 +199,7 @@ TokenTracker Sync/
 ├── assets/               generated UI images (bg / mascot / icon)
 ├── art/mascot.jpg        source artwork
 ├── tests/diff_test.py    differential + regression tests
+├── tests/security_test.py  security regression tests
 ├── packaging/            asset generator + PyInstaller build script
 └── docs/MERGE-RULES.md   exact merge semantics
 ```

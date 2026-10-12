@@ -158,6 +158,20 @@ python tests/diff_test.py
 现有方案里**没有一个**是"拷一个文件过来合并"，也**没有一个**懂 TokenTracker 的去重语义。
 完整调研（含每个替代方案的做法与取舍）见 [docs/PRIOR-ART.md](docs/PRIOR-ART.md)。
 
+## 安全性
+
+本工具**唯一的攻击面就是「你导入的那个数据文件」**，所以导入路径一律按不可信输入处理：
+
+- 数值必须是有限数 —— 拒绝 `NaN` / `Infinity`，并且写入端从结构上不可能产出它们
+  （那是非法 JSON，会让 TokenTracker 自己读不了这一行）
+- 每行按**数值字段白名单**清洗，构造出来的文件无法把任意字段塞进你的队列
+- 对文件体积、单队列行数、来源机器数都设了上限
+- 还原操作会校验解析后的绝对路径确实在数据目录内
+- 已有但无法解析的行**原样保留**，绝不静默删除
+
+用 `python tests/security_test.py` 验证（15 条断言，每条都对应一个具体发现）。
+完整威胁模型、发现与修复：[docs/SECURITY.md](docs/SECURITY.md)。
+
 ## 法律声明
 
 - **非官方工具。** 本项目与 TokenTracker 项目无关联、未获其背书。
@@ -181,6 +195,7 @@ TokenTracker Sync/
 ├── assets/               生成出来的界面图片（背景 / 角色 / 图标）
 ├── art/mascot.jpg        原始角色素材
 ├── tests/diff_test.py    对拍 + 回归测试
+├── tests/security_test.py 安全回归测试
 ├── packaging/            资源生成脚本 + PyInstaller 打包脚本
 └── docs/MERGE-RULES.md   精确的合并语义
 ```

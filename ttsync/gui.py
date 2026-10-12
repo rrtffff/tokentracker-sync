@@ -441,6 +441,19 @@ class App:
             lines.append(p["target"]["label"])
             lines.append(f"    合并前 {core.fmt_num(p['before'])}  →  合并后 {core.fmt_num(p['after'])}"
                          f"   （+{core.fmt_num(p['after'] - p['before'])}）")
+
+        dropped = snap.get("_dropped_fields") or {}
+        if dropped:
+            lines.append("")
+            lines.append("已忽略数据包里本工具不认识的字段：")
+            for qn, cnt in dropped.items():
+                lines.append(f"    {qn}：{'、'.join(sorted(cnt))}")
+
+        bad = sum(p.get("malformed", 0) for p in planned["plan"])
+        if bad:
+            lines.append("")
+            lines.append(f"注意：本机队列里有 {bad} 行无法解析，会原样保留、不计入统计。")
+
         lines += ["", "确认后会先自动备份本机数据，然后写入。", "（同一份数据重复导入不会重复计数）"]
 
         if not messagebox.askyesno(APP_TITLE, "\n".join(lines)):

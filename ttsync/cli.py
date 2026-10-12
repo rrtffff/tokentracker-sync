@@ -125,6 +125,20 @@ def cmd_import(args):
         )
     out("")
 
+    dropped = snap.get("_dropped_fields") or {}
+    if dropped:
+        out("  已忽略数据包中本工具不认识的字段（不会写进你的数据文件）：")
+        for qn, cnt in dropped.items():
+            items = "、".join(f"{k}×{v}" for k, v in sorted(cnt.items()))
+            out(f"    {qn}：{items}")
+        out("")
+
+    bad = sum(p.get("malformed", 0) for p in planned["plan"])
+    if bad:
+        out(f"  本机队列里有 {bad} 行无法解析（可能是上次写入被中断），")
+        out("  它们不会被计入统计，但会原样保留在文件末尾，不会被删除。")
+        out("")
+
     if dry:
         out("[dry-run] 未写入任何文件。")
         out("")

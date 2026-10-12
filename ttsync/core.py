@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -106,6 +107,37 @@ BACKUP_FILES_FULL = [
     "cloud-upload-owner.json",
 ]
 
+# ------------------------------------------------------------------ 安全边界
+
+# 允许从「外部快照」写入本机队列的数值字段白名单。
+# 依据：对真实 queue.jsonl 做字段普查得到的实际 schema（见 docs/SECURITY.md）。
+# 不在名单里的字段一律丢弃并计数 —— 这样一份构造出来的快照就无法把任意字段
+# 塞进用户的队列文件里（比如伪造的 kind 会改变 TokenTracker 对该行的解释）。
+SAFE_NUMERIC_FIELDS = frozenset({
+    "input_tokens",
+    "cached_input_tokens",
+    "cache_creation_input_tokens",
+    "output_tokens",
+    "reasoning_output_tokens",
+    "total_tokens",
+    "billable_total_tokens",
+    "conversation_count",
+    "total_cost_usd",
+    "priority_input_tokens",
+    "priority_output_tokens",
+    "priority_cached_input_tokens",
+    "priority_reasoning_output_tokens",
+})
+
+# 键字段（source / model / project_key / hour_start）的字符串长度上限
+MAX_KEY_TEXT = 512
+# 单个队列允许的行数上限
+MAX_SNAPSHOT_ROWS = 300_000
+# 快照文件大小上限
+MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
+# 状态文件里允许记录的最大来源机器数（每台都会把其全部行存下来）
+MAX_SOURCE_MACHINES = 64
+
 
 class SyncError(Exception):
     """面向用户的错误，GUI / CLI 直接展示 message。"""
@@ -145,28 +177,52 @@ def normalize_path_input(p) -> str:
     return s
 
 
+def _reject_const(name):
+    """JSON 标准里没有 NaN / Infinity，但 Python 的 json 默认接受。
+
+    上游用 JavaScript 读这些文件，`JSON.parse` 遇到 NaN / Infinity 会直接抛错。
+    所以把这类值当损坏数据处理，绝不静默吸收。
+    """
+    raise ValueError(f"非标准 JSON 常量：{name}")
+
+
+def _dumps(obj, **kw):
+    """统一序列化出口。
+
+    关键：allow_nan=False。否则一旦某个数值变成 NaN / Infinity，Python 会
+    写出字面量 `NaN`，而那是非法 JSON —— 上游将无法解析这一行，
+    相当于本工具把用户的数据写坏了。
+    """
+    kw.setdefault("ensure_ascii", False)
+    return json.dumps(obj, allow_nan=False, **kw)
+
+
 def read_json(path, default=None):
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return json.load(f, parse_constant=_reject_const)
     except Exception:
         return default
 
 
 def write_json(path, obj, private=True):
+    body = _dumps(obj) + "\n"          # 先整体序列化：失败就不落地，不留半个文件
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False)
-        f.write("\n")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(body)
     os.replace(tmp, path)
 
 
 def read_jsonl(path):
-    """返回 (rows, malformed_count, missing)。"""
+    """返回 (rows, malformed_lines, missing)。
+
+    malformed_lines 是**原始文本行**，不是计数 —— 合并时会原样写回，
+    保证本工具不会以「解析不了」为理由丢掉用户已有的数据。
+    """
     if not os.path.exists(path):
-        return [], 0, True
-    rows, malformed = [], 0
+        return [], [], True
+    rows, malformed = [], []
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -174,16 +230,23 @@ def read_jsonl(path):
                 if not line:
                     continue
                 try:
-                    rows.append(json.loads(line))
+                    rows.append(json.loads(line, parse_constant=_reject_const))
                 except Exception:
-                    malformed += 1
+                    malformed.append(line)
     except OSError:
-        return [], 0, True
+        return [], [], True
     return rows, malformed, False
 
 
 def write_jsonl_atomic(path, rows):
-    body = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    """原子写入。rows 里可以是 dict，也可以是「原样保留的原始行」字符串。"""
+    parts = []
+    for r in rows:
+        if isinstance(r, str):
+            parts.append(r.replace("\n", " ").replace("\r", " ").strip() + "\n")
+        else:
+            parts.append(_dumps(r) + "\n")     # 先全部序列化，任何一行不合法就整体不写
+    body = "".join(parts)
     tmp = f"{path}.ttsync-tmp-{os.getpid()}"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(body)
@@ -209,7 +272,64 @@ def is_synthesized(row) -> bool:
 
 
 def key_of(row, key_fields) -> str:
+    """把键字段拼成一个字符串，仅用于做字典索引。
+
+    注意：**不能用它反推出各字段**（字段值里可能含分隔符）。需要还原字段时
+    必须用 key_parts()，它在同一轮扫描里顺带取到原始值。
+    """
     return "|".join(str(row.get(f) or "") for f in key_fields)
+
+
+def key_parts(row, key_fields) -> tuple:
+    return tuple(row.get(f) if isinstance(row.get(f), str) else "" for f in key_fields)
+
+
+def sanitize_row(row, key_fields):
+    """清洗一行「外部数据」。
+
+    返回 (clean_row, dropped_field_names)。规则：
+      · 键字段必须是长度受限的非空字符串
+      · 数值只允许已知字段，且必须是有限数（NaN / Infinity 直接报错中止）
+      · 其他一切字段丢弃并计数，绝不写进用户的数据文件
+    """
+    clean, dropped = {}, []
+    for f in key_fields:
+        v = row.get(f)
+        if not isinstance(v, str) or not v:
+            raise SyncError(f"数据包里有一行缺少合法的 {f} 字段")
+        if len(v) > MAX_KEY_TEXT:
+            raise SyncError(f"数据包里 {f} 字段过长（上限 {MAX_KEY_TEXT} 字符）")
+        clean[f] = v
+
+    for k, v in row.items():
+        if k in clean:
+            continue
+        if k not in SAFE_NUMERIC_FIELDS:
+            dropped.append(k)          # kind / _ttsync / 未知字段，一律不带进来
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            dropped.append(k)
+            continue
+        if isinstance(v, float):
+            if not math.isfinite(v):
+                raise SyncError(f"数据包里 {k} 的值不是有限数（{v}），文件可能已损坏")
+            if v.is_integer():
+                v = int(v)
+        clean[k] = v
+    return clean, dropped
+
+
+def totals_with_parts(rows, key_fields):
+    """去重后同时返回 (总量表, 键字段原值表)。
+
+    两边一次扫出来，合成行就不必再去「拆」键字符串，从根上避免
+    字段值里含分隔符导致错位。
+    """
+    totals, parts = {}, {}
+    for k, row in dedupe_last_wins(rows, key_fields).items():
+        parts[k] = key_parts(row, key_fields)
+        totals[k] = _add_into({}, row)
+    return totals, parts
 
 
 # --------------------------------------------------------- 聚合与合并
@@ -361,7 +481,7 @@ def export_data(out_dir=None, fmt="json", log=lambda s: None) -> dict:
                 "label": t["label"],
                 "keys": agg["keys"],
                 "tokens": agg["tokens"],
-                "malformed": malformed,
+                "malformed": len(malformed),
                 "skipped_synth": skipped,
                 "missing": missing,
             }
@@ -380,8 +500,7 @@ def export_data(out_dir=None, fmt="json", log=lambda s: None) -> dict:
     else:
         path = os.path.join(out_dir, f"{base}.json")
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(snapshot, f, ensure_ascii=False, indent=2)
-            f.write("\n")
+            f.write(_dumps(snapshot, indent=2) + "\n")
         files.append(path)
 
     for d in details:
@@ -438,9 +557,26 @@ def save_state(state: dict):
 # ------------------------------------------------------------------ 导入
 
 def read_snapshot(path) -> dict:
-    s = read_json(normalize_path_input(path), None)
+    """读取并**校验**一份外部数据包。
+
+    校验放在入口做一次，后续逻辑就可以放心地用这些行。
+    校验不通过就直接拒绝，不做任何「尽力而为」的猜测。
+    """
+    p = normalize_path_input(path)
+    if not os.path.exists(p):
+        raise SyncError(f"找不到数据文件：{path}")
+    try:
+        size = os.path.getsize(p)
+    except OSError as e:
+        raise SyncError(f"无法读取文件大小：{e}")
+    if size > MAX_SNAPSHOT_BYTES:
+        raise SyncError(
+            f"数据包过大（{size / 1048576:.0f} MB，上限 {MAX_SNAPSHOT_BYTES // 1048576} MB），已拒绝。"
+        )
+
+    s = read_json(p, None)
     if not isinstance(s, dict):
-        raise SyncError(f"数据文件无法解析：{path}")
+        raise SyncError(f"数据文件无法解析（或含非法数值）：{path}")
     if s.get("format") != SNAPSHOT_FORMAT:
         raise SyncError(f"这不是 TokenTracker Sync 数据包（format={s.get('format')}）：{path}")
     try:
@@ -451,6 +587,33 @@ def read_snapshot(path) -> dict:
         raise SyncError(f"数据包版本 {ver} 高于本工具支持的 {SNAPSHOT_VERSION}，请更新工具。")
     if not isinstance(s.get("queues"), dict):
         raise SyncError(f"数据包缺少 queues 字段：{path}")
+
+    # 逐行清洗：只保留键字段与已知数值字段，其余丢弃并统计
+    dropped = {}
+    for name, t in TARGETS.items():
+        q = (s.get("queues") or {}).get(name)
+        if q is None:
+            continue
+        if not isinstance(q, dict) or not isinstance(q.get("rows"), list):
+            raise SyncError(f"数据包的 queues.{name}.rows 格式不对：{path}")
+        if len(q["rows"]) > MAX_SNAPSHOT_ROWS:
+            raise SyncError(
+                f"数据包 queues.{name} 有 {len(q['rows']):,} 行，超过上限 "
+                f"{MAX_SNAPSHOT_ROWS:,} 行，已拒绝。"
+            )
+        clean_rows, cnt = [], {}
+        for row in q["rows"]:
+            if not isinstance(row, dict):
+                continue
+            c, dr = sanitize_row(row, t["key_fields"])
+            clean_rows.append(c)
+            for d in dr:
+                cnt[d] = cnt.get(d, 0) + 1
+        q["rows"] = clean_rows
+        if cnt:
+            dropped[name] = cnt
+
+    s["_dropped_fields"] = dropped
     return s
 
 
@@ -464,12 +627,22 @@ def precheck_import(snapshot) -> dict:
     return {"machine_key": inc_id or f"host:{hostname}", "hostname": hostname, "mine": mine}
 
 
-def plan_import(snapshot) -> list:
+def plan_import(snapshot) -> dict:
     """只计算不写入，返回每个队列的合并计划。"""
     info = precheck_import(snapshot)
     incoming_key = info["machine_key"]
     state = load_state()
-    imports = json.loads(json.dumps(state.get("imports") or {}))
+    # 深拷贝一份，避免下面改动污染真实状态
+    imports = json.loads(_dumps(state.get("imports") or {}))
+
+    known = set(imports.keys())
+    if incoming_key not in known and len(known) >= MAX_SOURCE_MACHINES:
+        raise SyncError(
+            f"已记录 {len(known)} 台来源机器，达到上限 {MAX_SOURCE_MACHINES}。\n"
+            "       每台来源的数据都会永久保存在 tt-sync-state.json 里，无上限增长会拖慢每次导入。\n"
+            "       如确实需要，请先在 GUI 里「回滚导入」清理不再需要的来源。"
+        )
+
     plan = []
 
     for name, t in TARGETS.items():
@@ -478,22 +651,34 @@ def plan_import(snapshot) -> list:
             plan.append({"name": name, "target": t, "skip": True, "reason": "数据包中没有这部分数据"})
             continue
 
-        snap_totals = to_totals(dedupe_last_wins(snap_q["rows"], t["key_fields"]))
-        own_rows, malformed, _ = read_jsonl(t["file"])
-        own_rows = [r for r in own_rows if not is_synthesized(r)]
-        own_totals = to_totals(dedupe_last_wins(own_rows, t["key_fields"]))
+        # 快照已在 read_snapshot() 里清洗过
+        snap_totals, snap_parts = totals_with_parts(snap_q["rows"], t["key_fields"])
 
-        others = {}
+        own_all, malformed, _ = read_jsonl(t["file"])
+        own_rows = [r for r in own_all if not is_synthesized(r)]
+        own_totals, own_parts = totals_with_parts(own_rows, t["key_fields"])
+
+        others, other_parts = {}, {}
         for mk, entry in imports.items():
             if mk == incoming_key:
                 continue
             q = ((entry or {}).get("queues") or {}).get(name)
             if not q or not isinstance(q.get("rows"), list):
                 continue
-            others[mk] = to_totals(dedupe_last_wins(q["rows"], t["key_fields"]))
+            ot, op = totals_with_parts(q["rows"], t["key_fields"])
+            others[mk] = ot
+            for k, v in op.items():
+                other_parts.setdefault(k, v)
 
         contributors = dict(others)
         contributors[incoming_key] = snap_totals
+
+        # 键字段原值汇总：本机优先，其次已导入来源，最后新快照。
+        # 绝不从键字符串里拆 —— 字段值本身可能含分隔符。
+        parts_by_key = {}
+        for src in (snap_parts, other_parts, own_parts):
+            for k, v in src.items():
+                parts_by_key.setdefault(k, v)
 
         keys = set(own_totals.keys())
         for tt in contributors.values():
@@ -501,25 +686,28 @@ def plan_import(snapshot) -> list:
 
         synthesized = []
         for k in keys:
-            parts = k.split("|")
+            parts = parts_by_key.get(k)
+            if parts is None:
+                # 理论上不会发生（k 一定来自某一份 rows）。真遇到就跳过，
+                # 而不是硬拆字符串造出一个字段错位的行。
+                continue
+
             base = dict(own_totals.get(k) or {})
             for i, f in enumerate(t["key_fields"]):
-                base[f] = parts[i] if i < len(parts) else ""
+                base[f] = parts[i]
+
             has_import = False
-            for mk, tt in contributors.items():
+            for tt in contributors.values():
                 row = tt.get(k)
                 if not row:
                     continue
                 has_import = True
                 for kk, vv in row.items():
-                    if kk == MARK_FIELD:
+                    if kk == MARK_FIELD or kk in t["key_fields"]:
                         continue
-                    if isinstance(vv, bool):
+                    if isinstance(vv, bool) or not isinstance(vv, (int, float)):
                         continue
-                    if isinstance(vv, (int, float)):
-                        base[kk] = (base.get(kk) or 0) + vv
-                    elif kk not in base or base[kk] == "":
-                        base[kk] = vv
+                    base[kk] = (base.get(kk) or 0) + vv
             if not has_import:
                 continue
             base[MARK_FIELD] = "+".join(sorted(contributors.keys()))
@@ -548,7 +736,9 @@ def plan_import(snapshot) -> list:
                 "before_keys": before["keys"],
                 "after": after_tokens,
                 "after_keys": len(keys),
-                "malformed": malformed,
+                # 原样保留的损坏行（不是计数），写回时附在文件末尾，确保不丢数据
+                "malformed_lines": list(malformed),
+                "malformed": len(malformed),
                 "snapshot_rows": snap_q["rows"],
             }
         )
@@ -576,8 +766,14 @@ def apply_import(planned: dict, source_file: str) -> dict:
             written.append(f"备份 {os.path.basename(bak)}")
 
         rows = list(p["passthrough"]) + list(p["own_usage"]) + list(p["synthesized"])
+        # 已有的无法解析的行（截断等）原样附在末尾，不因「读不懂」就丢掉用户数据
+        mal = p.get("malformed_lines") or []
+        rows += mal
         write_jsonl_atomic(t["file"], rows)
-        written.append(f"{os.path.basename(t['file'])} ← {len(rows)} 行（含 {len(p['synthesized'])} 行合成）")
+        note = f"{os.path.basename(t['file'])} ← {len(rows)} 行（含 {len(p['synthesized'])} 行合成）"
+        if mal:
+            note += f"，另保留 {len(mal)} 行无法解析的原始数据"
+        written.append(note)
 
         if os.path.exists(t["state_file"]):
             st = read_json(t["state_file"], {}) or {}
@@ -624,7 +820,7 @@ def status() -> dict:
             "own": own_agg,
             "merged": merged_agg,
             "synth_rows": len(synth),
-            "malformed": malformed,
+            "malformed": len(malformed),
         }
 
     for mk, entry in (state.get("imports") or {}).items():
@@ -686,8 +882,8 @@ def backup(note: str = "", full: bool = False, out_dir: str = None) -> dict:
     }
     name = f"tt-backup-{safe_name(machine['hostname'])}-{now_stamp()}{'-full' if full else ''}.json"
     path = os.path.join(out_dir, name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(bundle, f, ensure_ascii=False)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(_dumps(bundle))
 
     return {
         "file": path,
@@ -742,20 +938,40 @@ def restore_backup(which, log=lambda s: None) -> dict:
     stamp = now_stamp()
     safety = os.path.join(BACKUP_DIR, f"pre-restore-{stamp}")
     os.makedirs(safety, exist_ok=True)
+
+    def _safe_target(raw_name) -> str:
+        """把备份里的文件名解析成 TRACKER_DIR 内的一个确定路径。
+
+        第一层：显式挡掉分隔符、`..`、驱动器号（`C:`）和 NUL —— 合法数据文件名里
+                不该出现这些。
+        第二层：再校验解析结果确实落在 TRACKER_DIR 之内（纵深防御，防止
+                Windows 路径拼接的边角行为）。
+        """
+        name = str(raw_name or "")
+        if not name or "/" in name or "\\" in name or ".." in name or ":" in name or "\x00" in name:
+            return ""
+        base = os.path.abspath(TRACKER_DIR)
+        target = os.path.abspath(os.path.join(base, name))
+        try:
+            if os.path.commonpath([base, target]) != base:
+                return ""
+        except ValueError:
+            return ""
+        return target
+
     saved = []
     for f in bundle.get("files") or []:
-        cur = os.path.join(TRACKER_DIR, f["name"])
-        if not os.path.exists(cur):
+        target = _safe_target(f.get("name"))
+        if not target or not os.path.exists(target):
             continue
-        shutil.copy2(cur, os.path.join(safety, f["name"]))
-        saved.append(f["name"])
+        shutil.copy2(target, os.path.join(safety, os.path.basename(target)))
+        saved.append(os.path.basename(target))
 
     restored = 0
     for f in bundle.get("files") or []:
-        name = f.get("name") or ""
-        if "/" in name or "\\" in name or ".." in name:
+        target = _safe_target(f.get("name"))
+        if not target:
             continue
-        target = os.path.join(TRACKER_DIR, name)
         tmp = f"{target}.ttsync-restore-{os.getpid()}"
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(f.get("content") or "")
