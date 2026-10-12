@@ -266,6 +266,19 @@ def cmd_backup(args):
         out(f"    · {name}  ({size / 1024:.0f} KB)")
     out("")
     out(f"  已写出：{r['file']}")
+
+    if r.get("excluded_sensitive"):
+        out("")
+        out("  已排除的凭据文件（不会写进备份，避免分享/上传时泄露）：")
+        for n in r["excluded_sensitive"]:
+            out(f"    × {n}")
+    if r.get("privacy_notes"):
+        out("")
+        out("  隐私提示 —— 这份备份里除了数字，还有：")
+        for n in r["privacy_notes"]:
+            out(f"    · {n}")
+        out("    分享给他人前请先确认这些内容可以外传。")
+
     out("")
     out("注意：这是「整体覆盖式还原」用的备份，不是跨机器合并包。")
     out("跨机器合并请用 export / import。")

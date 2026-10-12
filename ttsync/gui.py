@@ -480,7 +480,7 @@ class App:
     # ------------------------------------------------------------ 备份
 
     def do_backup(self):
-        d = self._dialog("创建备份", 470, 200)
+        d = self._dialog("创建备份", 470, 232)
         tk.Label(d, text="备注（可留空）：", bg=C_CARD, fg=C_TEXT,
                  font=(self.F, 9)).grid(row=0, column=0, padx=(16, 6), pady=(18, 8), sticky="w")
         note_var = tk.StringVar()
@@ -489,10 +489,13 @@ class App:
         e.grid(row=0, column=1, padx=(0, 16), pady=(18, 8))
         e.focus_set()
         full_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(d, text="包含会话数据（体积更大）", variable=full_var, bg=C_CARD,
+        tk.Checkbutton(d, text="包含会话数据（含会话标题，体积更大）", variable=full_var, bg=C_CARD,
                        fg=C_TEXT, font=(self.F, 9), activebackground=C_CARD,
                        selectcolor=C_CARD, bd=0).grid(row=1, column=0, columnspan=2,
                                                       padx=16, sticky="w")
+        tk.Label(d, text="云端 token / cookie 等凭据文件永远不会被写入备份",
+                 bg=C_CARD, fg=C_MUTED, font=(self.F, 8)).grid(
+            row=2, column=0, columnspan=2, padx=16, pady=(4, 0), sticky="w")
 
         def go():
             note, full = note_var.get(), full_var.get()
@@ -514,11 +517,23 @@ class App:
             for name, size in r["files"]:
                 self.log(f"  · {name}  ({size / 1024:.0f} KB)")
             self.log(f"已写出：{r['file']}")
+            for n in (r.get("excluded_sensitive") or []):
+                self.log(f"  已排除凭据文件：{n}")
+            for n in (r.get("privacy_notes") or []):
+                self.log(f"  隐私提示：{n}")
             self.refresh_backups()
-            messagebox.showinfo(APP_TITLE, f"备份完成。\n\n{r['file']}")
+
+            msg = f"备份完成。\n\n{r['file']}"
+            if r.get("excluded_sensitive"):
+                msg += ("\n\n已排除 %d 个凭据文件（不会进备份，避免分享时泄露）：\n  %s"
+                        % (len(r["excluded_sensitive"]), "\n  ".join(r["excluded_sensitive"])))
+            if r.get("privacy_notes"):
+                msg += "\n\n这份备份里除了数字，还含有：\n  " + "\n  ".join(r["privacy_notes"])
+                msg += "\n\n分享给他人前请先确认这些内容可以外传。"
+            messagebox.showinfo(APP_TITLE, msg)
 
         bf = tk.Frame(d, bg=C_CARD)
-        bf.grid(row=2, column=0, columnspan=2, pady=(12, 14))
+        bf.grid(row=3, column=0, columnspan=2, pady=(12, 14))
         self._btn(bf, "开始备份", go, "primary").pack(side="left", padx=6)
         self._btn(bf, "取消", d.destroy).pack(side="left", padx=6)
         d.bind("<Return>", lambda _e: go())

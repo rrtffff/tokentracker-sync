@@ -5,8 +5,10 @@ cd /d "%~dp0\.."
 
 rem ---------------------------------------------------------------------------
 rem Build TokenTrackerSync.exe (GUI, no console) and TokenTrackerSync-cli.exe (console) on Windows.
-rem Requires: Python 3.8+ with tkinter, and:
-rem   pip install pyinstaller tkinterdnd2
+rem Requires: Python 3.8+ with tkinter.
+rem Build deps are PINNED WITH HASHES in packaging\requirements-build.txt and
+rem installed with --require-hashes, so a tampered package on PyPI cannot end up
+rem inside the released exe. Run `install_build_deps.bat` once if needed.
 rem Output: dist\TokenTrackerSync.exe , dist\TokenTrackerSync-cli.exe
 rem ---------------------------------------------------------------------------
 
@@ -24,13 +26,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [1/3] Checking PyInstaller...
-python -c "import PyInstaller" 2>nul
+echo [1/4] Checking build dependencies (pinned + hash-verified)...
+python -c "import PyInstaller, tkinterdnd2" 2>nul
 if errorlevel 1 (
-  echo Installing pyinstaller tkinterdnd2 ...
-  python -m pip install --disable-pip-version-check pyinstaller tkinterdnd2
+  echo Installing pinned build dependencies...
+  python -m pip install --disable-pip-version-check --require-hashes --no-deps ^
+    -r packaging\requirements-build.txt
   if errorlevel 1 (
-    echo [ERROR] pip install failed.
+    echo [ERROR] pip install failed - a package hash did not match, or the network failed.
+    echo         Do NOT fall back to an unpinned install; investigate first.
     pause
     exit /b 1
   )

@@ -208,21 +208,31 @@ def main():
                        {"name": "../escaped.json", "content": "pwned"},
                        {"name": "..\\escaped2.json", "content": "pwned"},
                        {"name": "C:drv-rel.json", "content": "pwned"},
-                       {"name": "legit.json", "content": "{}"},
                    ]}, f)
-    r = core.restore_backup(evil)
-    # 「逃逸」的定义是跑到 tracker 目录之外。落在目录内（哪怕文件名长得奇怪）
-    # 不算逃逸 —— 那只是被规整成了目录内的一个普通文件名。
-    outside = []
-    for probe_dir in (os.path.dirname(core.TRACKER_DIR), os.getcwd()):
-        for n in ("escaped.json", "escaped2.json", "drv-rel.json"):
-            if os.path.exists(os.path.join(probe_dir, n)):
-                outside.append(os.path.join(probe_dir, n))
+    # 路径穿越只可能来自篡改 → 合法备份不会出现，因此直接中止整份还原
+    try:
+        core.restore_backup(evil)
+        check("含路径穿越的备份被中止", False, "未中止")
+    except core.SyncError as e:
+        check("含路径穿越的备份被中止", "不安全" in str(e) or "篡改" in str(e))
+    outside = [os.path.join(p, n)
+               for p in (os.path.dirname(core.TRACKER_DIR), os.getcwd())
+               for n in ("escaped.json", "escaped2.json", "drv-rel.json")
+               if os.path.exists(os.path.join(p, n))]
     check("越界文件名未能写到 tracker 目录之外", not outside, str(outside))
-    check("带驱动器号的名字被显式拒绝（未在目录内落地）",
+    check("带驱动器号的名字未在目录内落地",
           not os.path.exists(os.path.join(core.TRACKER_DIR, "drv-rel.json")))
-    check("正常文件名仍可还原", r["restored"] == 1, f"还原 {r['restored']} 个")
-    check("还原返回结构完整", isinstance(r, dict) and "restored" in r and "safety_dir" in r)
+
+    # 一个干净的备份仍应正常还原
+    d = sandbox()
+    good = os.path.join(d, "good.json")
+    with open(good, "w", encoding="utf-8") as f:
+        json.dump({"format": core.BACKUP_FORMAT, "version": 1,
+                   "files": [{"name": "queue.jsonl", "content": '{"source":"a"}\n'}]}, f)
+    rg = core.restore_backup(good)
+    check("干净备份可正常还原", rg["restored"] == 1, f"还原 {rg['restored']} 个")
+    check("还原返回结构完整",
+          isinstance(rg, dict) and "restored" in rg and "safety_dir" in rg)
 
     print()
     print("=" * 72)
@@ -243,6 +253,126 @@ def main():
     merged = st["queues"]["main"]["merged"]["tokens"]
     check("同机 last-wins + 跨机相加仍然正确（120+300+70=490）", merged == 490, f"{merged}")
     check("第二次导入幂等", (run_import(p), core.status()["queues"]["main"]["merged"]["tokens"])[1] == 490)
+
+    print()
+    print("=" * 72)
+    print("7. 备份不得包含凭据（含链接伪装与旧版本备份）")
+    print("=" * 72)
+
+    # 7a. 凭据识别：既要覆盖已知文件，也要能认出将来新增的
+    known = ["cloud-device-token.json", "cloud-upload-owner.json", "relay-cookies.json"]
+    future = ["my-api-token.json", "credentials.json", "oauth-refresh.json",
+              "app.secret.json", "svc-password.txt"]
+    fine = ["queue.jsonl", "cursors.json", "session.queue.jsonl", "config.json",
+            "project.queue.jsonl"]
+    check("已知凭据文件全部识别", all(core.is_sensitive_name(n) for n in known))
+    check("按名字模式认出未来新增的凭据文件", all(core.is_sensitive_name(n) for n in future),
+          "、".join(n for n in future if not core.is_sensitive_name(n)) or "无漏网")
+    check("普通数据文件不被误伤", not any(core.is_sensitive_name(n) for n in fine),
+          "、".join(n for n in fine if core.is_sensitive_name(n)) or "无误伤")
+
+    # 7b. 完整备份里不得出现凭据内容
+    d = sandbox()
+    secrets = {
+        "cloud-device-token.json": {"token": "SECRET_DEVICE_TOKEN"},
+        "cloud-upload-owner.json": {"ownerId": "SECRET_OWNER"},
+        "relay-cookies.json": {"insforge_refresh_token": "SECRET_REFRESH",
+                               "insforge_csrf_token": "SECRET_CSRF"},
+    }
+    for name, obj in secrets.items():
+        with open(os.path.join(core.TRACKER_DIR, name), "w", encoding="utf-8") as f:
+            json.dump(obj, f)
+    with open(os.path.join(core.TRACKER_DIR, "cursors.json"), "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "files": {r"C:\Users\me\proj\.codex\s.jsonl": {"inode": 1}}}, f)
+    with open(os.path.join(core.TRACKER_DIR, "session.queue.jsonl"), "w", encoding="utf-8") as f:
+        f.write(json.dumps({"session_id": "s", "title": "重构内部结算模块",
+                            "source": "claude"}) + "\n")
+
+    r = core.backup(note="sec", full=True)
+    blob = open(r["file"], encoding="utf-8").read()
+    leaked = [v for obj in secrets.values() for v in obj.values() if v in blob]
+    check("完整备份不含任何凭据内容", not leaked, str(leaked))
+    check("备份记录了被排除的凭据文件",
+          set(secrets) <= set(r["excluded_sensitive"]), str(r["excluded_sensitive"]))
+    check("提示里说明了 cursors.json 含路径",
+          any("绝对路径" in n for n in r["privacy_notes"]), str(r["privacy_notes"]))
+    check("提示里说明了会话标题可能透露内容",
+          any("会话标题" in n for n in r["privacy_notes"]), str(r["privacy_notes"]))
+
+    # 7c. 硬链接伪装：把凭据链接成允许备份的名字，必须拒绝
+    d = sandbox()
+    tok = os.path.join(core.TRACKER_DIR, "cloud-device-token.json")
+    with open(tok, "w", encoding="utf-8") as f:
+        json.dump({"token": "SECRET_VIA_LINK"}, f)
+    fake = os.path.join(core.TRACKER_DIR, "session.queue.jsonl")
+    linked = False
+    try:
+        os.link(tok, fake)
+        linked = True
+    except OSError:
+        pass
+    if linked:
+        try:
+            core.backup(note="link", full=True)
+            check("硬链接伪装的凭据文件被拒绝", False, "未拦截")
+        except core.SyncError as e:
+            check("硬链接伪装的凭据文件被拒绝", "普通文件" in str(e) or "链接" in str(e))
+        os.remove(fake)
+    else:
+        check("硬链接伪装的凭据文件被拒绝", True, "本机无法建硬链接，跳过")
+
+    # 7d. 旧版本备份里含凭据 → 应「跳过凭据、其余照常还原」，而不是整份中止
+    d = sandbox()
+    legacy = os.path.join(d, "legacy.json")
+    with open(legacy, "w", encoding="utf-8") as f:
+        json.dump({"format": core.BACKUP_FORMAT, "version": 1, "createdAt": "2026-01-01",
+                   "scope": "full", "machine": {"hostname": "OLD"},
+                   "files": [
+                       {"name": "cloud-device-token.json", "content": '{"token":"OLD_SECRET"}'},
+                       {"name": "relay-cookies.json", "content": '{"x":"OLD_COOKIE"}'},
+                       {"name": "queue.jsonl", "content": "RESTORED\n"},
+                   ]}, f)
+    with open(os.path.join(core.TRACKER_DIR, "queue.jsonl"), "w", encoding="utf-8") as f:
+        f.write("BEFORE\n")
+    res = core.restore_backup(legacy)
+    check("旧备份：正常文件照常还原", res["restored"] == 1 and
+          open(os.path.join(core.TRACKER_DIR, "queue.jsonl"), encoding="utf-8").read().strip()
+          == "RESTORED")
+    check("旧备份：凭据文件被跳过并记录",
+          set(res["skipped_sensitive"]) == {"cloud-device-token.json", "relay-cookies.json"},
+          str(res["skipped_sensitive"]))
+    check("旧备份：凭据未被写回磁盘",
+          not os.path.exists(os.path.join(core.TRACKER_DIR, "cloud-device-token.json")))
+
+    # 7e. 备份里的路径穿越仍应中止（只可能来自篡改）
+    d = sandbox()
+    evil2 = os.path.join(d, "evil2.json")
+    with open(evil2, "w", encoding="utf-8") as f:
+        json.dump({"format": core.BACKUP_FORMAT, "version": 1,
+                   "files": [{"name": "../escaped.json", "content": "x"}]}, f)
+    try:
+        core.restore_backup(evil2)
+        check("备份中的路径穿越仍被中止", False, "未中止")
+    except core.SyncError as e:
+        check("备份中的路径穿越仍被中止", "不安全" in str(e) or "篡改" in str(e))
+
+    print()
+    print("=" * 72)
+    print("8. 正常备份还原仍然可用（防止加固改坏功能）")
+    print("=" * 72)
+    d = sandbox()
+    with open(os.path.join(core.TRACKER_DIR, "config.json"), "w", encoding="utf-8") as f:
+        json.dump({"machineId": "B" * 64, "keep": "yes"}, f)
+    b = core.backup(note="roundtrip")
+    check("默认备份不含凭据、也不含会话数据",
+          all(n not in ("session.queue.jsonl", "cloud-device-token.json")
+              for n, _ in b["files"]), str([n for n, _ in b["files"]]))
+    with open(os.path.join(core.TRACKER_DIR, "config.json"), "w", encoding="utf-8") as f:
+        f.write("BROKEN")
+    rr = core.restore_backup(0)
+    check("常规备份可正常还原", json.load(open(os.path.join(core.TRACKER_DIR, "config.json"),
+                                              encoding="utf-8")).get("keep") == "yes",
+          f"还原 {rr['restored']} 个")
 
     ok = sum(1 for _, o, _ in RESULTS if o)
     print(f"\n===== 通过 {ok}/{len(RESULTS)} =====")

@@ -24,6 +24,7 @@ import os
 import platform
 import shutil
 import socket
+import stat
 import sys
 from datetime import datetime
 
@@ -103,9 +104,50 @@ BACKUP_FILES_CORE = [
 BACKUP_FILES_FULL = [
     "session.queue.jsonl",
     "session.queue.jsonl.meta.json",
+]
+
+# 凭据类文件：**永不写入备份，也永不从备份还原**。
+#
+# 为什么这里的处理要这么重：备份是一个明文 JSON，用户的直觉是「这就是我的用量数据」，
+# 很容易随手发出去。而真实数据目录里确实躺着凭据 ——
+#   · cloud-device-token.json  → 云端设备 token
+#   · relay-cookies.json       → insforge refresh token + csrf token
+#   · cloud-upload-owner.json  → 云端账号 id
+# 所以采用「显式清单 + 名字模式」双保险：清单应对已知文件，模式应对将来新增的。
+SENSITIVE_FILES = frozenset({
     "cloud-device-token.json",
     "cloud-upload-owner.json",
-]
+    "relay-cookies.json",
+})
+SENSITIVE_NAME_PATTERNS = (
+    "token", "cookie", "credential", "secret", "password", "passwd",
+    "apikey", "api_key", "refresh", "csrf", "bearer", "oauth",
+)
+
+
+def is_sensitive_name(name: str) -> bool:
+    """判断一个文件名是否属于凭据类（大小写不敏感，含子串匹配）。"""
+    low = str(name or "").lower()
+    return low in SENSITIVE_FILES or any(p in low for p in SENSITIVE_NAME_PATTERNS)
+
+
+def _is_safe_backup_source(path: str) -> bool:
+    """只接受普通文件：拒绝符号链接、Windows 重解析点、硬链接。
+
+    动机：备份的「不允许把凭据写进去」是靠**文件名**做的。如果攻击者能在数据目录里
+    放一个名为 `session.queue.jsonl` 的硬链接指向 `cloud-device-token.json`，
+    按名字判断就会放行，凭据内容照样进备份。所以必须同时看文件的真实类型。
+    """
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or os.path.islink(path):
+        return False
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if getattr(info, "st_file_attributes", 0) & reparse:
+        return False
+    return getattr(info, "st_nlink", 1) == 1
 
 # ------------------------------------------------------------------ 安全边界
 
@@ -841,15 +883,56 @@ def status() -> dict:
 
 # ------------------------------------------------------------------ 备份
 
-def _collect_backup_files(full: bool) -> list:
+def _safe_target(raw_name) -> str:
+    """把备份里的文件名解析成 TRACKER_DIR 内的一个确定路径；不合法则返回 ""。
+
+    第一层：显式挡掉分隔符、`..`、驱动器号（`C:`）和 NUL —— 合法数据文件名里
+            不该出现这些。
+    第二层：再校验解析结果确实落在 TRACKER_DIR 之内（纵深防御，防止
+            Windows 路径拼接的边角行为）。
+    """
+    name = str(raw_name or "")
+    if not name or "/" in name or "\\" in name or ".." in name or ":" in name or "\x00" in name:
+        return ""
+    base = os.path.abspath(TRACKER_DIR)
+    target = os.path.abspath(os.path.join(base, name))
+    try:
+        if os.path.commonpath([base, target]) != base:
+            return ""
+    except ValueError:
+        return ""
+    return target
+
+
+def _collect_backup_files(full: bool) -> dict:
+    """收集要写进备份的文件。
+
+    返回 {"files": [...], "excluded": [...], "notes": [...]}
+
+    安全约束：**凭据类文件永不进备份**。这里用「显式清单 + 名字模式」两道，
+    因为纯清单容易漏 —— 真实数据目录里除了 cloud-device-token.json，
+    还有 relay-cookies.json（含 refresh token 与 csrf token）这种没人提过的文件。
+    """
     wanted = BACKUP_FILES_CORE + (BACKUP_FILES_FULL if full else [])
-    out = []
+    out, excluded, notes = [], [], []
     for name in wanted:
+        if is_sensitive_name(name):
+            # 双保险：即使有人把凭据文件加进了上面的清单，这里也会拦下
+            excluded.append(name)
+            continue
         p = os.path.join(TRACKER_DIR, name)
         if not os.path.exists(p):
             continue
+        if not _is_safe_backup_source(p):
+            raise SyncError(
+                f"拒绝备份「{name}」：它不是普通文件（符号链接 / 重解析点 / 硬链接）。\n"
+                f"       路径：{p}\n"
+                "       备份只接受普通文件，以免链接被用来把别的文件（例如云端凭据）\n"
+                "       伪装成允许备份的数据。请检查这个文件后重试。"
+            )
         with open(p, "rb") as f:
             buf = f.read()
+        notes.extend(_privacy_notes(name, buf))
         out.append(
             {
                 "name": name,
@@ -858,7 +941,45 @@ def _collect_backup_files(full: bool) -> list:
                 "content": buf.decode("utf-8", errors="replace"),
             }
         )
-    return out
+
+    # 报告「目录里实际存在、但没有被备份」的凭据文件 —— 这才是用户需要知道的信息
+    try:
+        for name in sorted(os.listdir(TRACKER_DIR)):
+            if name in excluded:
+                continue
+            if is_sensitive_name(name) and os.path.isfile(os.path.join(TRACKER_DIR, name)):
+                excluded.append(name)
+    except OSError:
+        pass
+
+    return {"files": out, "excluded": excluded, "notes": notes}
+
+
+def _privacy_notes(name: str, buf: bytes) -> list:
+    """告诉用户这份备份里有哪些「不是数字」的敏感内容。"""
+    notes = []
+    try:
+        if name == "cursors.json":
+            data = json.loads(buf.decode("utf-8", errors="replace"))
+            n = len(data.get("files") or {})
+            if n:
+                notes.append(f"cursors.json 含 {n} 条本机文件的绝对路径")
+        elif name == "session.queue.jsonl":
+            titles = 0
+            for line in buf.decode("utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    if isinstance(json.loads(line).get("title"), str):
+                        titles += 1
+                except Exception:
+                    continue
+            if titles:
+                notes.append(f"session.queue.jsonl 含 {titles} 条会话标题（可能透露你在做什么）")
+    except Exception:
+        pass
+    return notes
 
 
 def backup(note: str = "", full: bool = False, out_dir: str = None) -> dict:
@@ -866,7 +987,8 @@ def backup(note: str = "", full: bool = False, out_dir: str = None) -> dict:
     os.makedirs(out_dir, exist_ok=True)
 
     machine = own_machine()
-    files = _collect_backup_files(full)
+    collected = _collect_backup_files(full)
+    files = collected["files"]
     if not files:
         raise SyncError(f"没有找到任何可备份的数据文件（目录：{TRACKER_DIR}）")
 
@@ -879,6 +1001,7 @@ def backup(note: str = "", full: bool = False, out_dir: str = None) -> dict:
         "machine": machine,
         "trackerDir": TRACKER_DIR,
         "files": files,
+        "excludedSensitive": collected["excluded"],
     }
     name = f"tt-backup-{safe_name(machine['hostname'])}-{now_stamp()}{'-full' if full else ''}.json"
     path = os.path.join(out_dir, name)
@@ -891,6 +1014,8 @@ def backup(note: str = "", full: bool = False, out_dir: str = None) -> dict:
         "scope": bundle["scope"],
         "machine": machine,
         "total_bytes": sum(x["size"] for x in files),
+        "excluded_sensitive": collected["excluded"],
+        "privacy_notes": collected["notes"],
     }
 
 
@@ -935,48 +1060,55 @@ def restore_backup(which, log=lambda s: None) -> dict:
     if not isinstance(bundle, dict) or bundle.get("format") != BACKUP_FORMAT:
         raise SyncError(f"这不是 TokenTracker Sync 备份文件：{path}")
 
+    # ---- 先把所有条目校验一遍，再动手 ----
+    entries = bundle.get("files")
+    if not isinstance(entries, list):
+        raise SyncError(f"备份文件结构不对（缺少 files）：{path}")
+
+    skipped, actions = [], []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SyncError("备份里有格式不对的文件条目，已中止（文件可能被篡改）")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise SyncError("备份里有文件条目缺少文件名，已中止（文件可能被篡改）")
+
+        if is_sensitive_name(name):
+            # 旧版本备份里可能含凭据文件。**只跳过这一类，不中止整个还原** ——
+            # 用户要的是拿回自己的用量数据，不该因为夹带了一个凭据就整份还原不了。
+            skipped.append(name)
+            continue
+
+        target = _safe_target(name)
+        if not target:
+            # 路径穿越只可能来自篡改，合法备份不会出现 → 直接中止
+            raise SyncError(
+                f"备份里的文件名不安全，已中止：{name!r}\n"
+                "       合法备份不会出现这类名字，这个文件可能被改动过。"
+            )
+        actions.append((name, target, entry.get("content") or ""))
+
     stamp = now_stamp()
     safety = os.path.join(BACKUP_DIR, f"pre-restore-{stamp}")
     os.makedirs(safety, exist_ok=True)
 
-    def _safe_target(raw_name) -> str:
-        """把备份里的文件名解析成 TRACKER_DIR 内的一个确定路径。
-
-        第一层：显式挡掉分隔符、`..`、驱动器号（`C:`）和 NUL —— 合法数据文件名里
-                不该出现这些。
-        第二层：再校验解析结果确实落在 TRACKER_DIR 之内（纵深防御，防止
-                Windows 路径拼接的边角行为）。
-        """
-        name = str(raw_name or "")
-        if not name or "/" in name or "\\" in name or ".." in name or ":" in name or "\x00" in name:
-            return ""
-        base = os.path.abspath(TRACKER_DIR)
-        target = os.path.abspath(os.path.join(base, name))
-        try:
-            if os.path.commonpath([base, target]) != base:
-                return ""
-        except ValueError:
-            return ""
-        return target
-
     saved = []
-    for f in bundle.get("files") or []:
-        target = _safe_target(f.get("name"))
-        if not target or not os.path.exists(target):
+    for name, target, _content in actions:
+        if not os.path.exists(target):
             continue
         shutil.copy2(target, os.path.join(safety, os.path.basename(target)))
         saved.append(os.path.basename(target))
 
     restored = 0
-    for f in bundle.get("files") or []:
-        target = _safe_target(f.get("name"))
-        if not target:
-            continue
+    for _name, target, content in actions:
         tmp = f"{target}.ttsync-restore-{os.getpid()}"
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(f.get("content") or "")
+            fh.write(content)
         os.replace(tmp, target)
         restored += 1
+
+    for n in skipped:
+        log(f"  跳过凭据文件（不会写回本机）：{n}")
 
     return {
         "path": path,
@@ -985,7 +1117,8 @@ def restore_backup(which, log=lambda s: None) -> dict:
         "safety_dir": safety,
         "saved": saved,
         "restored": restored,
-        "names": [f.get("name") for f in (bundle.get("files") or [])],
+        "skipped_sensitive": skipped,
+        "names": [name for name, _t, _c in actions],
     }
 
 

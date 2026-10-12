@@ -166,10 +166,13 @@ python tests/diff_test.py
   （那是非法 JSON，会让 TokenTracker 自己读不了这一行）
 - 每行按**数值字段白名单**清洗，构造出来的文件无法把任意字段塞进你的队列
 - 对文件体积、单队列行数、来源机器数都设了上限
-- 还原操作会校验解析后的绝对路径确实在数据目录内
+- **还原操作会校验解析后的绝对路径确实在数据目录内**
+- **凭据文件永远不会进入备份**（云端 token / cookie 等），
+  并且备份源只接受普通文件 —— 防止用硬链接把凭据伪装成允许备份的数据
 - 已有但无法解析的行**原样保留**，绝不静默删除
+- 构建依赖固定版本 + 固定 sha256（`packaging/requirements-build.txt`），防止供应链投毒
 
-用 `python tests/security_test.py` 验证（15 条断言，每条都对应一个具体发现）。
+用 `python tests/security_test.py` 验证（30 条断言，每条都对应一个具体发现）。
 完整威胁模型、发现与修复：[docs/SECURITY.md](docs/SECURITY.md)。
 
 ## 法律声明

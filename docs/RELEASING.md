@@ -161,3 +161,67 @@ python tokentracker-sync.py        # 需要 Python 3.8+ 且带 tkinter，不需�
 **Q：要不要发到 PyPI？**
 可以，但没必要——这是给终端用户用的桌面工具，不是库。
 真要发的话，改一下 `pyproject.toml` 就行，需要时告诉我。
+
+---
+
+## 更新构建依赖（版本 + 哈希）
+
+`packaging/requirements-build.txt` 把构建依赖锁死在具体版本和 sha256 上，
+`build_windows.bat` 用 `pip install --require-hashes --no-deps` 安装 ——
+哈希对不上就拒绝安装。目的是两个：构建可复现，以及防止 PyPI 上某个包被投毒后
+把恶意代码打进发布的 exe（这种事真实发生过多次）。
+
+**升级依赖时**：
+
+```bash
+# 1. 下载指定版本（或在没有版本号时下最新）
+pip download pyinstaller tkinterdnd2 -d <临时目录>
+
+# 2. 对这个目录里每个 .whl 计算 sha256
+python -c "
+import hashlib, os, sys, re
+d = sys.argv[1]
+for f in sorted(os.listdir(d)):
+    if not f.endswith(('.whl', '.tar.gz')):
+        continue
+    h = hashlib.sha256(open(os.path.join(d, f), 'rb').read()).hexdigest()
+    m = re.match(r'^([A-Za-z0-9_.]+?)-(\d[^-]*)-', f)
+    print(f'{m.group(1).lower()}=={m.group(2)}  --hash=sha256:{h}')
+" <临时目录>
+
+# 3. 用输出替换 requirements-build.txt 里的对应行
+
+# 4. 在全新虚拟环境里验证一遍（务必做，否则构建脚本可能已经坏了）
+python -m venv /tmp/v && /tmp/v/Scripts/pip install --require-hashes --no-deps \
+  -r packaging/requirements-build.txt
+```
+
+**注意**：PyInstaller 有一批传递依赖（`altgraph`、`pefile`、`pywin32-ctypes`、
+`pyinstaller-hooks-contrib`、`setuptools`、`packaging`），
+升级 PyInstaller 后这些也要一并更新，否则 `--require-hashes` 会因为缺少哈希而报错。
+
+---
+
+## 发布前务必确认：备份里没有凭据
+
+这个话题值得单独写一段，因为它曾经是一个真实的高危问题。
+
+`--full` 备份以前会把 `cloud-device-token.json`（含真实云端 token）
+写成明文 JSON。备份很容易被随手分享，一泄露就是账号凭据。
+
+现在的保障是**双保险**，两者都要在发布前确认还有效：
+
+1. `SENSITIVE_FILES` 显式清单 + `SENSITIVE_NAME_PATTERNS` 名字模式
+2. `_is_safe_backup_source()` 拒绝符号链接 / 重解析点 / 硬链接
+
+发布前跑一次：
+
+```bash
+python tests/security_test.py     # 第 7 节专门覆盖这件事
+```
+
+**另外提醒**：如果真实数据目录里出现了新的凭据类文件（名字里不含
+`token`/`cookie`/`secret`/`credential` 等关键词），需要把它加进 `SENSITIVE_FILES`。
+判断方法：`~/.tokentracker/tracker/` 里任何体积很小、内容是 JSON 且含长随机
+字符串的文件，都值得警惕。
+

@@ -171,9 +171,13 @@ treated as untrusted input and validated up front:
   inject arbitrary fields into your queue
 - Size limits on the file, on rows per queue, and on how many source machines are recorded
 - Restores are confined to the data directory by resolved-path check
+- **Credentials never enter a backup** (cloud token / cookie files), and backup sources
+  must be regular files — so a hard link cannot disguise a credential as allowed data
 - Unparseable existing lines are preserved verbatim, never silently dropped
+- Build dependencies are pinned with sha256 hashes (`packaging/requirements-build.txt`),
+  so a tampered package on PyPI cannot end up in a released exe
 
-Verified by `python tests/security_test.py` (15 assertions, each tied to a specific
+Verified by `python tests/security_test.py` (30 assertions, each tied to a specific
 finding). Full threat model, findings and fixes: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Legal & disclaimers
