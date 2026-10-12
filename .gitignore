@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+*.spec.bak
+
+# 本地测试沙盒
+_dtest/
+_sandbox/
+_test/
+*.ttsync-tmp-*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 用户导出的数据 / 备份（绝不提交）
+tt-usage-*.json
+tt-usage-*.csv
+tt-backup-*.json
