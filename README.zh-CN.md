@@ -1,10 +1,14 @@
-# tt-sync
+# TokenTracker Sync
 
 **把 TokenTracker 的用量数据在多台电脑之间合并起来 —— 纯本地、免费。**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![无联网](https://img.shields.io/badge/network-none-success.svg)](#法律声明)
+
 [English](README.md) · [合并规则](docs/MERGE-RULES.md) · [更新日志](CHANGELOG.md)
 
-![tt-sync 界面](docs/screenshot.png)
+![TokenTracker Sync 界面](docs/screenshot.png)
 
 ---
 
@@ -22,7 +26,7 @@
 | 官方有没有规划本地导出导入 | ❌ 没有。`docs/cloud-guide.md` 明确把**同步和备份**都列为付费云服务 |
 | 官方 issue 里有没有同类需求 | ❌ `multiple computers` = 0 条，标题含 `export` = 0 条，标题含 `backup` = 0 条 |
 
-于是 `tt-sync` 用**本地文件 + U 盘**把这个空缺补上：不需要账号、不联网、不订阅。
+于是 `TokenTracker Sync` 用**本地文件 + U 盘**把这个空缺补上：不需要账号、不联网、不订阅。
 
 > 这是第三方社区工具，与 TokenTracker 官方无关，也未获其背书。
 > 它**从不修改 TokenTracker 本身**，只动数据文件，而且每次动之前都先备份。
@@ -38,7 +42,7 @@
 | **同一台机器内**同键重复（该小时的累计更新） | 取**最后一条** | ✅ 恰好正确 |
 | **两台机器**同键（同小时、同工具、同模型，各自独立的用量） | 必须**相加** | ❌ 一台的数据被静默丢掉 |
 
-弄反了就是丢数据或重复计数。`tt-sync` 的做法是：**先按机器各自 last-wins 去重，再跨机器相加**，写回时给合成行打上幂等标记，所以重复导入永远不会累加。
+弄反了就是丢数据或重复计数。`TokenTracker Sync` 的做法是：**先按机器各自 last-wins 去重，再跨机器相加**，写回时给合成行打上幂等标记，所以重复导入永远不会累加。
 
 完整规则见 [docs/MERGE-RULES.md](docs/MERGE-RULES.md)。
 
@@ -61,10 +65,10 @@
 
 ### 方案 A —— 用 exe（Windows，最省事）
 
-1. 从 [Releases](../../releases) 下载 `TTSync.exe`，放哪儿都行（比如就放在 TokenTracker 安装目录旁边）
+1. 从 [Releases](../../releases) 下载 `TokenTrackerSync.exe`，放哪儿都行（比如就放在 TokenTracker 安装目录旁边）
 2. **两台电脑都先在 TokenTracker 里关闭云同步**
-3. A 机：运行 `TTSync.exe` → **导出数据** → 选 U 盘 → 得到 `tt-usage-<机器名>-<时间>.json`
-4. B 机：运行 `TTSync.exe` → **导入并合并** → 选中那个文件（也可以直接拖进窗口，或拖到 exe 图标上）
+3. A 机：运行 `TokenTrackerSync.exe` → **导出数据** → 选 U 盘 → 得到 `tt-usage-<机器名>-<时间>.json`
+4. B 机：运行 `TokenTrackerSync.exe` → **导入并合并** → 选中那个文件（也可以直接拖进窗口，或拖到 exe 图标上）
 5. 打开 TokenTracker —— 面板已经显示 A + B 的合计，**不用重启**
 
 想让 A 也看到合计：把 B 导出的文件带回 A 再导入一次。这个方向是**双向安全**的——导出时绝不会带上你导入进来的数据，所以 A↔B 来回搬运不会重复计数。
@@ -72,10 +76,10 @@
 ### 方案 B —— 跑源码
 
 ```bash
-git clone https://github.com/<you>/tt-sync.git
-cd tt-sync
-python tt-sync.py            # 图形界面
-python tt-sync.py status     # 命令行
+git clone https://github.com/<you>/tokentracker-sync.git
+cd tokentracker-sync
+python tokentracker-sync.py            # 图形界面
+python tokentracker-sync.py status     # 命令行
 ```
 
 需要 Python 3.8+ 且带 tkinter（官方 Windows/macOS 安装包自带）。**不需要 pip 安装任何东西。**
@@ -84,8 +88,8 @@ python tt-sync.py status     # 命令行
 
 ```bash
 pip install pyinstaller tkinterdnd2
-pyinstaller --noconfirm --onefile --noconsole --name TTSync --collect-all tkinterdnd2 tt-sync.py
-# 产物：dist/TTSync.exe
+pyinstaller --noconfirm --onefile --noconsole --name TokenTrackerSync --collect-all tkinterdnd2 tokentracker-sync.py
+# 产物：dist/TokenTrackerSync.exe
 ```
 
 或直接运行 `packaging/build_windows.bat`。
@@ -95,18 +99,18 @@ pyinstaller --noconfirm --onefile --noconsole --name TTSync --collect-all tkinte
 ## 命令行用法
 
 ```bash
-python tt-sync.py                            # 图形界面
-python tt-sync.py <数据包.json>               # 图形界面 + 直接导入该文件
+python tokentracker-sync.py                            # 图形界面
+python tokentracker-sync.py <数据包.json>               # 图形界面 + 直接导入该文件
 
-python tt-sync.py export --to "E:\"          # 导出（--format json|csv，默认 json）
-python tt-sync.py import "E:\tt-usage-*.json" --dry-run   # 只预览
-python tt-sync.py import "E:\tt-usage-*.json"             # 正式合并
-python tt-sync.py status                     # 本机合计 + 已导入来源
+python tokentracker-sync.py export --to "E:\"          # 导出（--format json|csv，默认 json）
+python tokentracker-sync.py import "E:\tt-usage-*.json" --dry-run   # 只预览
+python tokentracker-sync.py import "E:\tt-usage-*.json"             # 正式合并
+python tokentracker-sync.py status                     # 本机合计 + 已导入来源
 
-python tt-sync.py backup --note "月度备份"    # 完整备份（单个文件）
-python tt-sync.py backups                    # 列出备份
-python tt-sync.py restore-backup 0           # 整体还原某个备份（覆盖）
-python tt-sync.py restore 0                  # 回滚某一次导入（导入前自动备份）
+python tokentracker-sync.py backup --note "月度备份"    # 完整备份（单个文件）
+python tokentracker-sync.py backups                    # 列出备份
+python tokentracker-sync.py restore-backup 0           # 整体还原某个备份（覆盖）
+python tokentracker-sync.py restore 0                  # 回滚某一次导入（导入前自动备份）
 ```
 
 ### 合并 vs 备份 —— 千万别搞混
@@ -152,8 +156,8 @@ python tests/diff_test.py
 ## 目录结构
 
 ```
-tt-sync/
-├── tt-sync.py            入口（默认开图形界面）
+TokenTracker Sync/
+├── tokentracker-sync.py            入口（默认开图形界面）
 ├── ttsync/
 │   ├── core.py           合并 / 导出 / 备份 / 还原（只用标准库）
 │   ├── cli.py            命令行

@@ -4,10 +4,10 @@ setlocal
 cd /d "%~dp0\.."
 
 rem ---------------------------------------------------------------------------
-rem Build TTSync.exe (GUI, no console) and ttsync-cli.exe (console) on Windows.
+rem Build TokenTrackerSync.exe (GUI, no console) and TokenTrackerSync-cli.exe (console) on Windows.
 rem Requires: Python 3.8+ with tkinter, and:
 rem   pip install pyinstaller tkinterdnd2
-rem Output: dist\TTSync.exe , dist\ttsync-cli.exe
+rem Output: dist\TokenTrackerSync.exe , dist\TokenTrackerSync-cli.exe
 rem ---------------------------------------------------------------------------
 
 where python >nul 2>nul
@@ -43,8 +43,8 @@ if errorlevel 1 (
 )
 
 echo [3/4] Building GUI exe...
-python -m PyInstaller --noconfirm --onefile --noconsole --name TTSync ^
-  --icon assets\icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 tt-sync.py
+python -m PyInstaller --noconfirm --onefile --noconsole --name TokenTrackerSync ^
+  --icon assets\icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 tokentracker-sync.py
 if errorlevel 1 (
   echo [ERROR] GUI build failed.
   pause
@@ -52,8 +52,8 @@ if errorlevel 1 (
 )
 
 echo [4/4] Building CLI exe...
-python -m PyInstaller --noconfirm --onefile --console --name ttsync-cli ^
-  --icon assets\icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 tt-sync.py
+python -m PyInstaller --noconfirm --onefile --console --name TokenTrackerSync-cli ^
+  --icon assets\icon.ico --add-data "assets;assets" --collect-all tkinterdnd2 tokentracker-sync.py
 if errorlevel 1 (
   echo [ERROR] CLI build failed.
   pause

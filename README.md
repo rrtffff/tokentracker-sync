@@ -1,10 +1,14 @@
-# tt-sync
+# TokenTracker Sync
 
 **Merge your TokenTracker usage data across multiple computers — locally, for free.**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
+[![No network access](https://img.shields.io/badge/network-none-success.svg)](#legal--disclaimers)
+
 [中文说明](README.zh-CN.md) · [Merge rules](docs/MERGE-RULES.md) · [Changelog](CHANGELOG.md)
 
-![tt-sync GUI](docs/screenshot.png)
+![TokenTracker Sync GUI](docs/screenshot.png)
 
 ---
 
@@ -22,7 +26,7 @@ This was verified against the upstream repo:
 | Official roadmap for local export/import | ❌ None. `docs/cloud-guide.md` lists sync **and backups** as paid Cloud services |
 | Upstream issues asking for this | ❌ `multiple computers` = 0, `export` in title = 0, `backup` in title = 0 |
 
-So `tt-sync` fills that gap with **plain local files and a USB stick**: no account, no network, no subscription.
+So `TokenTracker Sync` fills that gap with **plain local files and a USB stick**: no account, no network, no subscription.
 
 > Unofficial community tool. Not affiliated with or endorsed by the TokenTracker project.
 > It never modifies TokenTracker itself — it only touches the data files, and always backs them up first.
@@ -38,7 +42,7 @@ You cannot just copy or concatenate the data files. TokenTracker reads its queue
 | Same key repeated **on one machine** (cumulative updates for that hour) | Keep the **last** one | ✅ happens to be right |
 | Same key on **two machines** (each machine's own usage in that hour) | **Sum** them | ❌ one machine's data is silently lost |
 
-Getting this backwards loses data or double-counts it. `tt-sync` does `last-wins per machine`, then `sum across machines`, and writes the result back with an idempotency marker so repeated imports never accumulate.
+Getting this backwards loses data or double-counts it. `TokenTracker Sync` does `last-wins per machine`, then `sum across machines`, and writes the result back with an idempotency marker so repeated imports never accumulate.
 
 Details: [docs/MERGE-RULES.md](docs/MERGE-RULES.md)
 
@@ -61,10 +65,10 @@ Details: [docs/MERGE-RULES.md](docs/MERGE-RULES.md)
 
 ### Option A — the .exe (Windows, simplest)
 
-1. Download `TTSync.exe` from [Releases](../../releases) and put it anywhere (e.g. next to your TokenTracker install).
+1. Download `TokenTrackerSync.exe` from [Releases](../../releases) and put it anywhere (e.g. next to your TokenTracker install).
 2. Turn **off** Cloud sync in TokenTracker on both machines.
-3. On machine A: run `TTSync.exe` → **导出数据** → pick the USB drive → you get one `tt-usage-<machine>-<time>.json`.
-4. On machine B: run `TTSync.exe` → **导入并合并** → select that file (or just drag it onto the window / onto the exe icon).
+3. On machine A: run `TokenTrackerSync.exe` → **导出数据** → pick the USB drive → you get one `tt-usage-<machine>-<time>.json`.
+4. On machine B: run `TokenTrackerSync.exe` → **导入并合并** → select that file (or just drag it onto the window / onto the exe icon).
 5. Open TokenTracker — the dashboard now shows A + B. No restart needed.
 
 To make machine A show the combined total too, export from B and import it on A. It is **bidirectionally safe**: exporting never includes data you imported, so A↔B round trips never double-count.
@@ -72,10 +76,10 @@ To make machine A show the combined total too, export from B and import it on A.
 ### Option B — from source
 
 ```bash
-git clone https://github.com/<you>/tt-sync.git
-cd tt-sync
-python tt-sync.py            # GUI
-python tt-sync.py status     # CLI
+git clone https://github.com/<you>/tokentracker-sync.git
+cd tokentracker-sync
+python tokentracker-sync.py            # GUI
+python tokentracker-sync.py status     # CLI
 ```
 
 Requires Python 3.8+ with tkinter (bundled with the official Windows/macOS installers). No `pip install` needed.
@@ -84,8 +88,8 @@ Requires Python 3.8+ with tkinter (bundled with the official Windows/macOS insta
 
 ```bash
 pip install pyinstaller tkinterdnd2
-pyinstaller --noconfirm --onefile --noconsole --name TTSync --collect-all tkinterdnd2 tt-sync.py
-# result: dist/TTSync.exe
+pyinstaller --noconfirm --onefile --noconsole --name TokenTrackerSync --collect-all tkinterdnd2 tokentracker-sync.py
+# result: dist/TokenTrackerSync.exe
 ```
 
 Or just run `packaging/build_windows.bat`.
@@ -95,18 +99,18 @@ Or just run `packaging/build_windows.bat`.
 ## CLI reference
 
 ```bash
-python tt-sync.py                            # GUI
-python tt-sync.py <data-file.json>           # GUI + import that file directly
+python tokentracker-sync.py                            # GUI
+python tokentracker-sync.py <data-file.json>           # GUI + import that file directly
 
-python tt-sync.py export --to "E:\"          # export (--format json|csv, json default)
-python tt-sync.py import "E:\tt-usage-*.json" --dry-run   # preview only
-python tt-sync.py import "E:\tt-usage-*.json"             # merge for real
-python tt-sync.py status                     # local total + imported sources
+python tokentracker-sync.py export --to "E:\"          # export (--format json|csv, json default)
+python tokentracker-sync.py import "E:\tt-usage-*.json" --dry-run   # preview only
+python tokentracker-sync.py import "E:\tt-usage-*.json"             # merge for real
+python tokentracker-sync.py status                     # local total + imported sources
 
-python tt-sync.py backup --note "monthly"    # full backup (single file)
-python tt-sync.py backups                    # list backups
-python tt-sync.py restore-backup 0           # restore a backup (overwrite)
-python tt-sync.py restore 0                  # roll back one import (pre-import backup)
+python tokentracker-sync.py backup --note "monthly"    # full backup (single file)
+python tokentracker-sync.py backups                    # list backups
+python tokentracker-sync.py restore-backup 0           # restore a backup (overwrite)
+python tokentracker-sync.py restore 0                  # roll back one import (pre-import backup)
 ```
 
 ### Merge vs backup — don't mix them up
@@ -152,8 +156,8 @@ Runs the merge on synthetic two-machine data in a temp directory and asserts: cr
 ## Layout
 
 ```
-tt-sync/
-├── tt-sync.py            entry point (GUI by default)
+TokenTracker Sync/
+├── tokentracker-sync.py            entry point (GUI by default)
 ├── ttsync/
 │   ├── core.py           merge / export / backup / restore (stdlib only)
 │   ├── cli.py            command line

@@ -1,4 +1,4 @@
-"""tt-sync 命令行接口（与图形界面共用同一套核心逻辑）。"""
+"""TokenTracker Sync 命令行接口（与图形界面共用同一套核心逻辑）。"""
 
 from __future__ import annotations
 
@@ -20,28 +20,41 @@ def _opt(args, name, default=""):
     return default
 
 
+def cmd_name() -> str:
+    """按实际调用方式显示命令名，避免写成"显示名"那样读起来不像命令。"""
+    base = os.path.basename(sys.argv[0] or "")
+    if not base:
+        return "tokenrackersync"
+    if base.lower().endswith(".exe"):
+        return base[:-4]
+    return f"python {base}"
+
+
 def print_help():
+    c = cmd_name()
     out(
         f"""
-tt-sync — TokenTracker 跨机器用量合并 / 备份 / 还原（非官方小工具）
+TokenTracker Sync — 跨机器用量合并 / 备份 / 还原（非官方小工具）
 
-用法（下面命令里的 tt-sync 指 ttsync-cli.exe 或 `python tt-sync.py`）：
-  tt-sync                         打开图形界面（推荐，= TTSync.exe）
-  tt-sync <数据包.json>            直接导入该数据包（等同于拖到程序图标上）
+用法：
+  {c}
+                                 打开图形界面（推荐）
+  {c} <数据包.json>
+                                 直接导入该数据包（等同于拖到程序图标上）
 
-  tt-sync export --to <目录> [--format json|csv]
-                                  导出本机数据（目录可指向 U 盘）
-  tt-sync import <数据包.json> [--dry-run] [--force] [--yes]
-                                  把数据包合并进本机
-  tt-sync status                  查看本机合计与已导入来源
-  tt-sync doctor                  环境自检（报 bug 时贴这个输出）
+  {c} export --to <目录> [--format json|csv]
+                                 导出本机数据（目录可指向 U 盘）
+  {c} import <数据包.json> [--dry-run] [--force] [--yes]
+                                 把数据包合并进本机
+  {c} status                     查看本机合计与已导入来源
+  {c} doctor                     环境自检（报 bug 时贴这个输出）
 
-  tt-sync backup [--full] [--note <备注>] [--out <目录>]
-                                  完整备份（生成单个文件，可整体还原）
-  tt-sync backups                 列出备份
-  tt-sync restore-backup <序号|文件>
-                                  整体还原某个备份
-  tt-sync restore <序号>           回滚某次导入前的自动备份
+  {c} backup [--full] [--note <备注>] [--out <目录>]
+                                 完整备份（生成单个文件，可整体还原）
+  {c} backups                    列出备份
+  {c} restore-backup <序号|文件>
+                                 整体还原某个备份
+  {c} restore <序号>              回滚某次导入前的自动备份
 
 两个不要混淆的概念：
   export / import     跨机器【合并】—— 两台的数据相加
@@ -71,7 +84,7 @@ def cmd_export(args):
 def cmd_import(args):
     path = next((a for a in args if not a.startswith("-")), "")
     if not path:
-        raise core.SyncError("用法：tt-sync.py import <数据包.json> [--dry-run] [--force] [--yes]")
+        raise core.SyncError("用法：tokentracker-sync.py import <数据包.json> [--dry-run] [--force] [--yes]")
     path = os.path.abspath(core.normalize_path_input(path))
     if not os.path.exists(path):
         raise core.SyncError(f"找不到数据包：{path}")
@@ -144,10 +157,10 @@ def cmd_doctor(_args):
         return ("…" + s[-6:]) if shown else s
 
     out("")
-    out("== tt-sync 环境自检 ==")
+    out("== TokenTracker Sync 环境自检 ==")
     try:
         from . import __version__
-        out(f"  tt-sync 版本    : {__version__}")
+        out(f"  TokenTracker Sync 版本    : {__version__}")
     except Exception:
         pass
     out(f"  Python          : {platform.python_version()}  ({platform.machine()})")
@@ -260,7 +273,7 @@ def cmd_backups(_args):
         out(f"      {b['createdAt']}   {b['scope']}   {b['size'] / 1024:.0f} KB"
             + (f"   备注：{b['note']}" if b["note"] else ""))
     out("")
-    out("还原：tt-sync.py restore-backup <序号或文件路径>")
+    out("还原：tokentracker-sync.py restore-backup <序号或文件路径>")
     out("")
 
 
@@ -275,7 +288,7 @@ def cmd_restore_backup(args):
         for i, b in enumerate(lst[:15]):
             out(f"  [{i}] {b['name']}")
         out("")
-        out("用法：tt-sync.py restore-backup <序号>")
+        out("用法：tokentracker-sync.py restore-backup <序号>")
         out("")
         return
     r = core.restore_backup(which, log=out)
@@ -299,7 +312,7 @@ def cmd_restore(args):
         for i, b in enumerate(lst[:15]):
             out(f"  [{i}] {b['name']}")
         out("")
-        out("用法：tt-sync.py restore <序号>")
+        out("用法：tokentracker-sync.py restore <序号>")
         out("")
         return
     r = core.restore_import_backup(which, log=out)
@@ -318,7 +331,7 @@ def run_cli(argv):
     if cmd in ("-v", "--version"):
         from . import __version__
 
-        out(f"tt-sync v{__version__}")
+        out(f"TokenTracker Sync v{__version__}")
         return 0
 
     table = {

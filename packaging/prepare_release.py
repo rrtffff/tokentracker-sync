@@ -4,8 +4,8 @@
     python packaging/prepare_release.py [版本号]
 
 产出（release/ 目录）：
-    TTSync.exe              图形界面版（双击即用）
-    ttsync-cli.exe          命令行版
+    TokenTrackerSync.exe              图形界面版（双击即用）
+    TokenTrackerSync-cli.exe          命令行版
     SHA256SUMS.txt          校验值
     LICENSE                 MIT 许可证
     THIRD_PARTY_NOTICES.txt 第三方组件声明
@@ -25,7 +25,7 @@ ROOT = os.path.dirname(HERE)
 DIST = os.path.join(ROOT, "dist")
 OUT = os.path.join(ROOT, "release")
 
-BINARIES = ["TTSync.exe", "ttsync-cli.exe"]
+BINARIES = ["TokenTrackerSync.exe", "TokenTrackerSync-cli.exe"]
 EXTRA = ["LICENSE", "THIRD_PARTY_NOTICES.txt"]
 
 
@@ -74,7 +74,7 @@ def main():
         print(f"  {name:<26} {size / 1024:>9,.0f} KB")
     print(f"  {'SHA256SUMS.txt':<26}")
     print("\n下一步：把这 4~5 个文件拖到 GitHub Release 的附件区。")
-    print("校验命令（Windows）：certutil -hashfile TTSync.exe SHA256")
+    print("校验命令（Windows）：certutil -hashfile TokenTrackerSync.exe SHA256")
     print()
 
 

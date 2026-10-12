@@ -1,9 +1,9 @@
 THIRD-PARTY NOTICES
 ===================
 
-The prebuilt binaries in Releases (TTSync.exe, ttsync-cli.exe) bundle the
+The prebuilt binaries in Releases (TokenTrackerSync.exe, TokenTrackerSync-cli.exe) bundle the
 following third-party software. Their licenses are reproduced or referenced
-below. tt-sync itself is licensed under the MIT License (see LICENSE).
+below. TokenTracker Sync itself is licensed under the MIT License (see LICENSE).
 
 -------------------------------------------------------------------------------
 1. Python (CPython) 3.12
@@ -43,13 +43,13 @@ Build-time only (NOT distributed inside the executables)
 -------------------------------------------------------------------------------
 Upstream project
 -------------------------------------------------------------------------------
-tt-sync reads and writes data files produced by TokenTracker
+TokenTracker Sync reads and writes data files produced by TokenTracker
 (https://github.com/xiufengsun/TokenTracker), which is MIT licensed.
 
-tt-sync is an independent implementation: no source code from TokenTracker was
+TokenTracker Sync is an independent implementation: no source code from TokenTracker was
 copied into this project. It interoperates with TokenTracker's on-disk file
 formats only. Credited here as a courtesy and to help users find the upstream
 project.
 
-tt-sync is NOT affiliated with, endorsed by, or sponsored by the TokenTracker
+TokenTracker Sync is NOT affiliated with, endorsed by, or sponsored by the TokenTracker
 project.

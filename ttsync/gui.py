@@ -1,4 +1,4 @@
-"""tt-sync 图形界面（tkinter）。
+"""TokenTracker Sync 图形界面（tkinter）。
 
 背景使用 assets/bg.png（柔和渐变 + 右侧角色），界面为左侧白卡片布局。
 运行期只依赖标准库：PNG 由 Tk 8.6 原生读取，不需要 Pillow。
@@ -29,7 +29,7 @@ except Exception:  # 未安装则优雅降级
     HAS_DND = False
 
 # 窗口标题带「非官方」，避免被误认为 TokenTracker 官方组件
-APP_TITLE = "tt-sync · TokenTracker 数据合并（非官方）"
+APP_TITLE = "TokenTracker Sync · 用量数据合并（非官方）"
 WIN_W, WIN_H = 980, 780
 LEFT_W = 596
 
@@ -93,7 +93,7 @@ class App:
         self.refresh_status()
         self.refresh_backups()
 
-        self.log("欢迎使用 tt-sync —— TokenTracker 跨机器用量合并 / 备份 / 还原。")
+        self.log("欢迎使用 TokenTracker Sync —— TokenTracker 跨机器用量合并 / 备份 / 还原。")
         self.log("非官方小工具，全程本地操作，不联网、不上传。")
         self.log("")
         if core.cloud_sync_enabled():
@@ -141,7 +141,7 @@ class App:
         # 右侧角色区域的小注脚
         foot = tk.Frame(self.root, bg=C_WASH)
         foot.place(x=LEFT_W, y=WIN_H - 54, width=WIN_W - LEFT_W, height=44)
-        tk.Label(foot, text="tt-sync", bg=C_WASH, fg=C_TITLE,
+        tk.Label(foot, text="TokenTracker Sync", bg=C_WASH, fg=C_TITLE,
                  font=(self.F, 11, "bold")).pack()
         tk.Label(foot, text="非官方 · 本地合并 · 不联网 · 免费", bg=C_WASH, fg=C_MUTED,
                  font=(self.F, 8)).pack()
@@ -407,7 +407,7 @@ class App:
         if not path:
             path = filedialog.askopenfilename(
                 title="选择另一台电脑导出的数据包",
-                filetypes=[("tt-sync 数据包", "*.json"), ("所有文件", "*.*")],
+                filetypes=[("TokenTracker Sync 数据包", "*.json"), ("所有文件", "*.*")],
             )
         if not path:
             return

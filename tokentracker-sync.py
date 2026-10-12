@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tt-sync —— TokenTracker 跨机器用量合并 / 备份 / 还原（非官方小工具）
+TokenTracker Sync —— TokenTracker 跨机器用量合并 / 备份 / 还原（非官方小工具）
 
 入口规则：
   · 不带参数            → 打开图形界面

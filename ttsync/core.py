@@ -1,5 +1,5 @@
 """
-tt-sync core —— TokenTracker 跨机器用量合并 / 备份 / 还原
+TokenTracker Sync core —— TokenTracker 跨机器用量合并 / 备份 / 还原
 
 本模块只依赖标准库，可被 GUI 与 CLI 共用。
 
@@ -59,6 +59,35 @@ TARGETS = {
         "key_names": ["项目路径", "数据源", "小时起点(UTC ISO)"],
     },
 }
+
+# 每个队列对应的磁盘文件名（真正与 TokenTracker 约定的部分，不要改）
+_TARGET_FILENAMES = {
+    "main": ("queue.jsonl", "queue.state.json"),
+    "projects": ("project.queue.jsonl", "project.queue.state.json"),
+}
+
+
+def use_home(home: str) -> None:
+    """把所有路径重新定位到指定的 home 目录。
+
+    主要给测试用（可以在临时目录里跑完整流程，不碰真实数据），
+    也方便需要多份独立数据的高级用法。
+    """
+    global HOME, TRACKER_DIR, TT_HOME, BACKUP_DIR
+    global STATE_FILE, CONFIG_FILE, CLOUD_PREF_FILE
+
+    HOME = home
+    TRACKER_DIR = os.path.join(home, ".tokentracker", "tracker")
+    TT_HOME = os.path.join(home, ".tokentracker", "tt-sync")
+    BACKUP_DIR = os.path.join(TT_HOME, "backups")
+    STATE_FILE = os.path.join(TRACKER_DIR, "tt-sync-state.json")
+    CONFIG_FILE = os.path.join(TRACKER_DIR, "config.json")
+    CLOUD_PREF_FILE = os.path.join(TRACKER_DIR, "cloud-sync-pref.json")
+
+    for name, t in TARGETS.items():
+        fn, sn = _TARGET_FILENAMES[name]
+        t["file"] = os.path.join(TRACKER_DIR, fn)
+        t["state_file"] = os.path.join(TRACKER_DIR, sn)
 
 BACKUP_FILES_CORE = [
     "queue.jsonl",
@@ -280,8 +309,8 @@ def build_merge_spec() -> dict:
             "不要把 rows 直接拼接或覆盖 —— 一定会出错。",
         ],
         "automation": (
-            "命令行实现：python tt-sync.py import <本文件路径> --dry-run 先预览，去掉 --dry-run 正式执行。"
-            "图形界面：双击 TTSync.exe，选「导入并合并」。两者都已验证，优于手写合并。"
+            "命令行实现：python tokentracker-sync.py import <本文件路径> --dry-run 先预览，去掉 --dry-run 正式执行。"
+            "图形界面：双击 TokenTrackerSync.exe，选「导入并合并」。两者都已验证，优于手写合并。"
         ),
         "backupNote": (
             "本包只用于跨机器【合并】。若要整体备份 / 还原本机数据，"
@@ -413,7 +442,7 @@ def read_snapshot(path) -> dict:
     if not isinstance(s, dict):
         raise SyncError(f"数据文件无法解析：{path}")
     if s.get("format") != SNAPSHOT_FORMAT:
-        raise SyncError(f"这不是 tt-sync 数据包（format={s.get('format')}）：{path}")
+        raise SyncError(f"这不是 TokenTracker Sync 数据包（format={s.get('format')}）：{path}")
     try:
         ver = int(s.get("version") or 0)
     except (TypeError, ValueError):
@@ -554,7 +583,7 @@ def apply_import(planned: dict, source_file: str) -> dict:
             st = read_json(t["state_file"], {}) or {}
             st["offset"] = 0
             st["updatedAt"] = now_iso()
-            st["note"] = f"tt-sync import {stamp}"
+            st["note"] = f"TokenTracker Sync import {stamp}"
             write_json(t["state_file"], st)
             written.append(f"{os.path.basename(t['state_file'])} offset→0")
 
@@ -708,7 +737,7 @@ def restore_backup(which, log=lambda s: None) -> dict:
 
     bundle = read_json(path, None)
     if not isinstance(bundle, dict) or bundle.get("format") != BACKUP_FORMAT:
-        raise SyncError(f"这不是 tt-sync 备份文件：{path}")
+        raise SyncError(f"这不是 TokenTracker Sync 备份文件：{path}")
 
     stamp = now_stamp()
     safety = os.path.join(BACKUP_DIR, f"pre-restore-{stamp}")
