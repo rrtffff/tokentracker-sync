@@ -142,6 +142,24 @@ python tests/diff_test.py
 
 Runs the merge on synthetic two-machine data in a temp directory and asserts: cross-machine summing, in-machine last-wins, idempotency, control-record preservation, and — because the original tool was written in JavaScript — a **differential test against the JS implementation**, asserting identical per-bucket numbers and totals.
 
+## How is this different from other tools?
+
+There are several projects that aggregate AI usage across machines. They generally
+fall into two camps — and this one is deliberately neither:
+
+| | Other multi-machine tools | This project |
+|---|---|---|
+| What it is | A **standalone tracker** (you switch to it) | An **add-on for TokenTracker** (you keep using it) |
+| Data source | Reads each AI tool's raw logs | Reads TokenTracker's already-aggregated `queue.jsonl` |
+| Transport | Self-hosted server, Docker, WebDAV, GitHub Gist/repo, VPN | **A file and a USB stick** |
+| Network required | Yes | **No — none at all** |
+| Account required | Usually | **No** |
+| Cost | Free (plus your infra) | Free |
+
+None of the existing tools does "copy one file across and merge", and none of them
+understands TokenTracker's dedup semantics. See [docs/PRIOR-ART.md](docs/PRIOR-ART.md)
+for the survey, including what each alternative does and where the trade-offs are.
+
 ## Legal & disclaimers
 
 - **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by TokenTracker.
